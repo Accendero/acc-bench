@@ -1,0 +1,29 @@
+version: 1
+stated_on: 2026-10-07
+owner: Example Owner
+question: >-
+  Which method should rank new trials for a mortality review, and does the free-text
+  summary add anything the structured fields do not?
+decision: Which trials a reviewer reads first, and whether to keep collecting summaries.
+target:
+  name: mortality
+  definition: Any death reported in the trial's results (synthetic).
+metric:
+  name: pr_auc
+  reason: Only the top of the ranked list is acted on, so precision at the top matters.
+  alternatives:
+    - name: roc_auc
+      why_not: Scores the whole ranking, including the part nobody reads.
+tasks:
+  - name: mortality
+    reason: The review decision concerns mortality only.
+reported_numbers:
+  - name: pr_auc_by_cell
+    decision: Which method to deploy for each phase.
+  - name: text_minus_tabular_by_cell
+    decision: Whether collecting the summary is worth its cost.
+measures:
+  - quantity: value of the summary field
+    used: drop_and_refit
+    instead_of: permutation
+    reason: The decision is whether to collect the field, which only drop-and-refit answers.

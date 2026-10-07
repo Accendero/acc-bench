@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "accbench"
+version = "0.1.0.dev0"
+description = "A benchmarking system with seven checked layers between a model and a claim."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Accendero Software, LLC" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scikit-learn>=1.4",
+    "scipy>=1.10",
+    "threadpoolctl>=3.1",
+    "pyyaml>=6.0",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Repository = "https://github.com/Accendero/acc-bench"
+Issues = "https://github.com/Accendero/acc-bench/issues"
+
+[project.optional-dependencies]
+gbm = ["xgboost>=2.0", "lightgbm>=4.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+acc-bench = "accbench.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/accbench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

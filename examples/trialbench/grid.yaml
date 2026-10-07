@@ -1,0 +1,9 @@
+construct: construct.yaml
+fixture: fixtures.yaml
+registry: channels.yaml
+channel_manifest: channel_manifest.json
+methods: [majority, logreg, hist_gbm, tfidf_logreg]
+split_keys: [split-0, split-1, split-2]
+fit_seeds: [0]
+threads: 1
+out: runs

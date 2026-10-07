@@ -1,0 +1,93 @@
+# Every one of TrialBench's 60 mortality columns, plus the four prepare.py adds, is
+# registered to one channel or ignored with a reason.
+channels:
+  design_counts:
+    kind: numeric
+    columns:
+      - Active Comparator Arm Number
+      - Behavioral intervention Number
+      - Biological intervention Number
+      - Combination Product intervention Number
+      - Device intervention Number
+      - Diagnostic Test intervention Number
+      - Dietary Supplement intervention Number
+      - Drug intervention Number
+      - Experimental Arm Number
+      - Genetic intervention Number
+      - MaskingType-Care Provider
+      - MaskingType-Investigator
+      - MaskingType-Outcomes Assessor
+      - MaskingType-Participant
+      - No Intervention Arm Number
+      - Other Arm Number
+      - Other intervention Number
+      - Placebo Comparator Arm Number
+      - Procedure intervention Number
+      - Radiation intervention Number
+      - Sham Comparator Arm Number
+      - enrollment
+      - number_of_arms
+      - study_design_info/masking_num
+  data_sharing:
+    kind: numeric
+    missing_indicator: true
+    columns:
+      - ipd_info_type-Analytic Code
+      - ipd_info_type-Clinical Study Report (CSR)
+      - ipd_info_type-Informed Consent Form (ICF)
+      - ipd_info_type-Statistical Analysis Plan (SAP)
+      - ipd_info_type-Study Protocol
+  registry_fields:
+    kind: categorical
+    encoding: one_hot
+    min_frequency: 5
+    columns:
+      - eligibility/gender
+      - eligibility/healthy_volunteers
+      - has_expanded_access
+      - oversight_info/has_dmc
+      - oversight_info/is_fda_regulated_device
+      - oversight_info/is_fda_regulated_drug
+      - patient_data/sharing_ipd
+      - responsible_party/responsible_party_type
+      - sponsors/lead_sponsor/agency_class
+      - study_design_info/allocation
+      - study_design_info/intervention_model
+      - study_design_info/masking
+      - study_design_info/primary_purpose
+  summary_text:
+    kind: text
+    max_features: 20000
+    min_df: 2
+    columns: [brief_summary/textblock, brief_title]
+  criteria_text:
+    kind: text
+    max_features: 20000
+    min_df: 2
+    columns: [eligibility/criteria/textblock]
+  clinical_text:
+    kind: text
+    max_features: 20000
+    min_df: 2
+    columns:
+      - condition
+      - condition_browse/mesh_term
+      - keyword
+      - intervention/intervention_name
+      - intervention/description
+      - intervention_browse/mesh_term
+ignore:
+  trial_id: the id (NCT number)
+  phase_cell: defines the cells; added by prepare.py
+  shipped_split: TrialBench's train/test split; used by the fixture, added by prepare.py
+  label: the label source (TrialBench's Y/N); added by prepare.py
+  phase: constant within a cell
+  study_type: constant (every trial is interventional)
+  location/facility/address/city: >-
+    left out; in the campaign its target encoding held the tabular methods back (T20)
+  smiless: molecule structures; this example has no molecule channel
+  icdcode: nested lists of diagnosis codes; not parsed in this example
+  eligibility/minimum_age: free-text ages ("18 Years"); not parsed in this example
+  eligibility/maximum_age: free-text ages; not parsed in this example
+  study_design_info/intervention_model_description: sparse free text, mostly missing
+  study_design_info/masking_description: sparse free text, mostly missing

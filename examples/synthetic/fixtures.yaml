@@ -1,0 +1,17 @@
+construct: construct.yaml
+id_column: trial_id
+tasks:
+  mortality:
+    source: data/trials.csv
+    type: binary
+    label_rule: {column: died}
+    cell_by: phase
+split:
+  test: {fraction: 0.25, key: test-v1}
+  validation: {fraction: 0.2}
+  keys: [split-0, split-1]
+cutoffs:
+  model: 2023-01-01
+arms:
+  seen: {cutoff: model, before: [results_posted_on]}
+  unseen: {cutoff: model, after: [registered_on]}

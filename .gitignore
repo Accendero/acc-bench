@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Benchmark outputs and downloaded data never belong in the repo.
+data/
+runs/
+outputs/
+examples/**/data/
+examples/**/out/
+.venv-min/

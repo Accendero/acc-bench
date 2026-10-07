@@ -1,0 +1,12 @@
+construct: construct.yaml
+id_column: trial_id
+tasks:
+  mortality:
+    source: data/mortality.csv
+    type: binary
+    label_rule: {column: label}
+    cell_by: phase_cell
+split:
+  test: {column: shipped_split, value: test}   # TrialBench's own test split, kept fixed
+  validation: {fraction: 0.2}
+  keys: [split-0, split-1, split-2]

@@ -1,0 +1,20 @@
+grid: grid.yaml
+resolution: resolution.json
+questions:
+  - id: Q1
+    question: >-
+      Does the text model beat the best tabular model on Phase 1, the campaign's headline
+      cell?
+    rule: difference_clears_floor
+    params:
+      cell: mortality/Phase1
+      a: tfidf_logreg
+      b: {select: [logreg, hist_gbm]}
+  - id: Q2
+    question: Does the text model beat the best tabular model in 3 or more of the 4 phases?
+    rule: k_of_n_cells
+    params:
+      cells: [mortality/Phase1, mortality/Phase2, mortality/Phase3, mortality/Phase4]
+      a: tfidf_logreg
+      b: {select: [logreg, hist_gbm]}
+      k: 3

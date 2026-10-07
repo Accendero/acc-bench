@@ -1,0 +1,11 @@
+construct: construct.yaml
+fixture: fixtures.yaml
+registry: channels.yaml
+channel_manifest: channel_manifest.json
+methods: [majority, logreg, hist_gbm, tfidf_logreg, stub_llm]
+methods_module: methods.py
+split_keys: [split-0, split-1]
+fit_seeds: [0, 1]
+threads: 1
+prices: prices.yaml
+out: runs

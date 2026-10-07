@@ -1,0 +1,10 @@
+channels:
+  tabular: {kind: numeric, columns: [age, enrollment]}
+  sponsor: {kind: categorical, columns: [sponsor], encoding: one_hot}
+  summary: {kind: text, columns: [summary], ngram_max: 1}
+ignore:
+  trial_id: the id
+  phase: defines the cells
+  died: the label source
+  registered_on: used for arms only
+  results_posted_on: used for arms only

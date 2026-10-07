@@ -1,0 +1,8 @@
+# Fictional prices for the example's stand-in model. Not a real model or price.
+currency: USD
+models:
+  example-llm-small:
+    input_per_1k: 0.0005
+    output_per_1k: 0.0015
+    read_on: 2026-10-07
+    source_url: https://example.com/fictional-prices

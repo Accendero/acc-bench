@@ -1,0 +1,28 @@
+version: 1
+stated_on: 2026-10-07
+owner: Example Owner
+question: >-
+  Which method should rank registered trials by their risk of a reported death, and does
+  the trial's free text add anything the structured registry fields do not?
+decision: Which trials a safety reviewer reads first, in each phase.
+target:
+  name: mortality
+  definition: >-
+    TrialBench's mortality event label (Y/N): whether any death was reported in the
+    trial's posted results on ClinicalTrials.gov.
+metric:
+  name: pr_auc
+  reason: Only the top of the ranked list would be acted on, so precision at the top matters.
+  alternatives:
+    - name: roc_auc
+      why_not: >-
+        Scores the whole ranking. In the campaign a model tied the reference on AUROC and
+        lost by 0.176 on PR-AUC, so the choice decides the verdict.
+tasks:
+  - name: mortality
+    reason: The review decision concerns deaths. One task keeps the example small.
+reported_numbers:
+  - name: pr_auc_by_phase
+    decision: Which method to deploy for each phase.
+  - name: text_minus_tabular_by_phase
+    decision: Whether the free-text fields are worth carrying into the review tool.
