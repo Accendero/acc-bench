@@ -194,7 +194,13 @@ def _claims(args: argparse.Namespace) -> int:
     elif args.verb == "show":
         rows = claims.table(args.log)
         for r in rows:
-            flag = "  (amended after results)" if r["amended_after_results"] else ""
+            flag = (
+                "  (amended after results)"
+                if r["amended_after_results"]
+                else "  (amended)"
+                if r["amendments"]
+                else ""
+            )
             print(f"{r['claim']:10} {r['status']:12} {r['test']:8} {r['statement']}{flag}")
         print("  ".join(f"{k} {v}" for k, v in claims.counts(rows).items()))
     elif args.verb == "check-doc":

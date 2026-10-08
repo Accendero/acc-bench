@@ -117,7 +117,7 @@ def _plain(text: str) -> str:
 
 
 def _sentences(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.?!:])\s+(?=[A-Z0-9\"])", _plain(text))
+    parts = re.split(r"(?<=[.?!:])\s+(?=[A-Z0-9\"]|acc-bench\b)", _plain(text))
     return [p.strip() for p in parts if p.strip()]
 
 

@@ -95,7 +95,8 @@ Make sure that you have these items:
    acc-bench --version
    ```
 
-   The terminal shows `acc-bench` and a version number, for example `acc-bench 0.1.0`.
+   The terminal shows `acc-bench` and a version number, for example `acc-bench 0.1.0` or
+   `acc-bench 0.1.0.dev0`.
 
 NOTE: Start the virtual environment again each time that you open a new terminal. If
 PowerShell does not let the script start, refer to the Microsoft information about
@@ -210,6 +211,20 @@ reported_numbers:
     decision: Which method to use in each hospital.
 ```
 
+The fields are:
+
+| Field | What to write |
+|---|---|
+| `version` | `1`. Increase it by 1 for each change to the statement. Refer to section 7.3. |
+| `stated_on` | The date on which you write the statement |
+| `owner` | The name of the person who is responsible for the benchmark. Free text. |
+| `question` | The question that the benchmark answers. Free text. |
+| `decision` | The decision that the answer helps you make. Free text. |
+| `target` | The `name` of the label, which is the task name, and its `definition` |
+| `metric` | The `name` of the metric, and the `reason` for it |
+| `tasks` | For each task, the `name` and the `reason` |
+| `reported_numbers` | For each number in your report, a `name` and the `decision` that it helps you make. The name is a free label. |
+
 You can also write two optional fields. Under `metric`, `alternatives` gives the other
 metrics that you did not use, and why. Under `measures`, you can record a measure that
 you selected in place of a different measure. Refer to `examples/synthetic/construct.yaml`.
@@ -253,7 +268,8 @@ split:
 ```
 
 The example puts 25 percent of the rows in the test set. Then it puts 20 percent of the
-other rows in the validation set.
+other rows in the validation set. The `key` of the test set is a name that sets which
+rows go to the test set. A different key gives different test rows.
 
 If your data already gives the test rows, write `test: {column: <name>, value: <value>}`
 in place of the fraction and the key. For example, `test: {column: split, value: test}` puts each row
@@ -272,15 +288,24 @@ acc-bench calculates the labels again from the columns in `label_columns` only. 
 labels are different, the freeze stops. A column in `label_columns` must not go to a
 model, because it gives the label.
 
-Example with a label function:
+Example of a complete `fixtures.yaml` with a label function. The data has the columns
+`serial`, `site` and `failure_score`. The label is `1` if `failure_score` is more than
+1.0:
 
 ```yaml
+construct: construct.yaml
+id_column: serial
 tasks:
   failed:
     source: data/devices.csv
     type: binary
     label_rule: labels:failed
     label_columns: [failure_score]
+    cell_by: site
+split:
+  test: {fraction: 0.25, key: test-v1}
+  validation: {fraction: 0.2}
+  keys: [split-0, split-1]
 ```
 
 ```python
@@ -300,7 +325,8 @@ group of columns that a model reads in the same way.
 2. Under `channels`, write each channel. Give each channel a `kind` and its `columns`.
 3. Under `ignore`, write each column that no model must read. Give the reason for each
    column.
-4. Put the identifier column, the label column and each column in `label_columns` under
+4. Put the identifier column under `ignore`. If one column gives the label, put it under
+   `ignore`. If a function gives the label, put each column in `label_columns` under
    `ignore`.
 5. Put the cell column under `ignore`. In one cell, all the rows have the same value in
    this column. Thus the column gives no information to a model.
@@ -321,7 +347,7 @@ Use one of these kinds:
 | `numeric` | Numbers | Optional: `impute` (`median`, or `mean` or `zero`), `scale` (`true`), `missing_indicator` (`false`) |
 | `categorical` | Categories | Necessary: `encoding` (`one_hot` or `target`). Optional: `min_frequency` (`1`) |
 | `text` | Free text | Optional: `max_features` (`20000`), `ngram_max` (`1`), `min_df` (`1`) |
-| `multihot` | Lists of codes, for example `I10;E11` | Optional: `separator` (`;`), `min_df` (`1`) |
+| `multihot` | Lists of codes, for example `I10;E11`. An empty value is permitted. | Optional: `separator` (`;`), `min_df` (`1`) |
 
 A column of grades, for example `A` to `E`, is categories. Use `categorical` with
 `one_hot`. If you change the grades to numbers before step 1, use `numeric`.
@@ -355,8 +381,8 @@ The grid gives the methods and the runs.
 1. Make a file with the name `grid.yaml` in the project folder.
 2. Write the fields in the example below.
 3. Under `methods`, write one or more of these methods: `majority`, `logreg`, `hist_gbm`
-   and `tfidf_logreg`. `tfidf_logreg` reads only `text` channels. The other methods read
-   the other channels.
+   and `tfidf_logreg`. `tfidf_logreg` reads only `text` channels. `logreg` and `hist_gbm`
+   read the `numeric`, `categorical` and `multihot` channels. `majority` reads no channel.
 4. Under `split_keys`, write names from `split.keys` in `fixtures.yaml`.
 5. Under `threads`, write the number of processor threads that each run can use. Use
    `1` if you are not sure. Some methods give different results with a different number
@@ -406,8 +432,9 @@ Use one of these rules:
 | `difference_of_drops` | Is the difference between two methods larger in one arm than in a second arm? | `cell`, `model`, `reference`, `seen_arm`, `unseen_arm` |
 
 For `a`, `b`, `model` or `reference`, write a method name. acc-bench can also select the
-best method from a list. To do this, write `{select: [<method>, <method>]}`. acc-bench
-selects the method with the best mean validation score. It uses the metric in
+best method from a list. To do this, write `{select: [<method>, <method>]}`.
+
+acc-bench selects the method with the best mean validation score. It uses the metric in
 `construct.yaml` and all the split keys and fit seeds. It does not use the test rows.
 The output of section 6.10 shows the selected method.
 
@@ -459,15 +486,18 @@ new claim after the first run, acc-bench cannot resolve the claim.
    | `no_effect` | The rule will find no effect | `difference_clears_floor` and `k_of_n_cells` |
 
    For `difference_clears_floor`, give the direction. With `effect` only, a result in
-   either direction confirms the claim.
-   Write `effect:a` if you predict that the method in `a` is better. Write `effect:b` for
-   the method in `b`.
+   either direction confirms the claim. Write `effect:a` if you predict that the method in
+   `a` is better. Write `effect:b` for the method in `b`.
+
    Use `effect:a` or `effect:b` if a side has a `select` list. You cannot know the selected
-   method before the runs.
+   method before the runs. The verdict names the better method. acc-bench compares that
+   method with the method that it used for `a` or `b`.
+
    acc-bench refuses a direction for a rule that does not report one.
 
-3. If you will not test a claim, register it with the question that can decide it.
-   Then record the reason. Run these commands:
+3. If you will not test a claim, register it with the question that is nearest to it.
+   acc-bench records the question and the prediction, but does not use them. Then record
+   the reason. Run these commands:
 
    ```bash
    acc-bench claims register C3 --statement "Older patients come back more often." --question Q1 --prediction effect
@@ -568,6 +598,7 @@ Each claim has one of these results:
    For example: "The text model is better in the south hospital [claim:C1]."
 2. Write what the data shows, not what the claim predicted. For an `inverted` claim, the
    data shows the opposite of the prediction. Write that result, and cite the claim.
+   For an `untested` claim, write that you did not test it, and why.
 3. Examine the report. Run this command:
 
    ```bash
@@ -576,7 +607,12 @@ Each claim has one of these results:
 
 4. The command can show a claim that is not in the register, or a claim with no current
    result. If it does, correct the report, or do the step that the message gives.
-5. To make sure that the report cites all the claims, add the option `--require-all`.
+5. To make sure that the report cites all the claims, add the option `--require-all`:
+
+   ```bash
+   acc-bench claims check-doc report.md --require-all
+   ```
+
 6. Read each statement again. Make sure that it agrees with the result that the command
    shows for its claim.
 
@@ -585,7 +621,8 @@ Each claim has one of these results:
 ### 7.1 Change the code
 
 When you change the code, acc-bench does not use the old runs. This prevents results
-from old code and new code in one table.
+from old code and new code in one table. After a change to the code, the command
+`acc-bench run` stops with a message that contains `are stale`.
 
 The code is all the Python files in the project folder and its subfolders, the files
 `pyproject.toml` and `requirements*.txt`, and the code of acc-bench. A new Python file, or a
@@ -632,38 +669,42 @@ CAUTION: Do not change a claim without a record. acc-bench keeps each change in 
 register, with its date and its reason.
 
 A change to a claim is also a change to the construct statement. Thus the fixture and
-the runs change too. To prevent this work, do section 6.6 step 5 before you register
-the claims.
+the runs change too. Section 6.6 step 5 finds errors in the questions before you
+register the claims. This prevents a change to a claim because of an error in a
+question.
 
 You can change the question, the prediction and the statement of a claim. Do the steps
 in this sequence.
 
 1. In `construct.yaml`, increase `version` by 1.
-2. Under `amendments`, add the new `version`, the `date` and the `reason`, as in this
-   example:
+2. Add the key `amendments` at the top level of the file, if it is not there. Under it,
+   add the new `version`, the `date` of the change and the `reason`. For example:
 
    ```yaml
    version: 2
    amendments:
      - version: 2
-       date: 2026-10-20
+       date: 2026-10-07
        reason: Q2 is the correct question for claim C1.
    ```
 
-3. Change the claim. Give the new question, prediction or statement. Run this command:
+3. Change the claim. Give each item that changes: `--question`, `--prediction` or
+   `--statement`. If the new question uses a different rule, also give a new prediction.
+   If the statement does not agree with the new question, give a new statement. Run this
+   command:
 
    ```bash
-   acc-bench claims amend C1 --reason "Q2 is the correct question." --question Q2 --prediction effect
+   acc-bench claims amend C1 --reason "Q2 is the correct question." --question Q2 --prediction no_effect --statement "The text model is not better in both hospitals."
    ```
 
 4. If acc-bench refuses the prediction, give a prediction that the new question can
    decide. Refer to the table in section 6.7.
-5. Do steps 2 to 5 of section 7.2.
-6. Make sure that the report agrees with the new result. Then do section 6.12 again.
+5. Change the report so that it agrees with the new claim.
+6. Do steps 2 to 5 of section 7.2. These steps include section 6.12.
 
-If you change a claim after the first run, acc-bench accepts the change. Then
-`acc-bench claims show` writes `(amended after results)` after the claim. Tell the
-readers of your report about this change.
+After a change, `acc-bench claims show` writes `(amended)` after the claim. If you
+changed the claim after the first run, it writes `(amended after results)` after
+`acc-bench claims resolve`. Tell the readers of your report about this change.
 
 ## 8 Add your own method
 
