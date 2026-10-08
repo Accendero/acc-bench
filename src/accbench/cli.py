@@ -22,6 +22,7 @@ def _fixtures_freeze(args: argparse.Namespace) -> int:
 
     fixture = freeze(args.spec, out_dir=args.out)
     print(f"{fixture.path}: {fixture.summary()}")
+    print(fixture.cell_table())
     return 0
 
 
@@ -111,11 +112,18 @@ def _resolve(args: argparse.Namespace) -> int:
 
 
 def _rules_test(args: argparse.Namespace) -> int:
-    from accbench.rules import load_questions, registered_rules, run_null_suite
+    from accbench.rules import check_questions, registered_rules, run_null_suite
 
     if args.questions:
-        load_questions(args.questions)  # registers the project's own rules
-    results = run_null_suite(args.rule or registered_rules(), draws=args.draws)
+        q = check_questions(args.questions)  # also registers the project's own rules
+        print(
+            f"{args.questions}: {len(q['questions'])} question(s); rule parameters, cell names "
+            "and method names match the grid"
+        )
+    names = args.rule
+    if not names and args.questions:
+        names = sorted({question["rule"] for question in q["questions"]})  # the rules in use
+    results = run_null_suite(names or registered_rules(), draws=args.draws)
     for name, r in results.items():
         verdict = "pass" if r["passed"] else "FAIL"
         exact = (
@@ -133,9 +141,20 @@ def _verdict(args: argparse.Namespace) -> int:
     from accbench.rules import decide
 
     result = decide(args.questions, out=args.out)
+    suite = result["null_suite"]
+    print(
+        "null-input test passed: "
+        + ", ".join(f"{n} ({r['effects_on_null']} of {r['draws']})" for n, r in suite.items())
+        + "; record in null_suite.json"
+    )
     for v in result["verdicts"]:
         oracle = "  [ORACLE]" if v["oracle"] else ""
         print(f"{v['id']}: {v['outcome']} - {v['summary']}{oracle}")
+        for sel in v["selections"]:
+            print(
+                f"    {sel['cell']}: selected {sel['chosen']} from {', '.join(sel['candidates'])} "
+                f"on {sel['on']} scores"
+            )
     return 0
 
 
@@ -163,6 +182,7 @@ def _claims(args: argparse.Namespace) -> int:
             prediction=args.prediction,
             question=args.question,
             questions=args.questions,
+            statement=args.statement,
         )
         print(f"amended {e['claim_id']} at {e['recorded_at']}")
     elif args.verb == "untested":
@@ -174,11 +194,19 @@ def _claims(args: argparse.Namespace) -> int:
     elif args.verb == "show":
         rows = claims.table(args.log)
         for r in rows:
-            print(f"{r['claim']:10} {r['status']:12} {r['test']:8} {r['statement']}")
+            flag = "  (amended after results)" if r["amended_after_results"] else ""
+            print(f"{r['claim']:10} {r['status']:12} {r['test']:8} {r['statement']}{flag}")
         print("  ".join(f"{k} {v}" for k, v in claims.counts(rows).items()))
     elif args.verb == "check-doc":
-        cited = claims.check_document(args.log, args.document)
-        print(f"{args.document}: {len(cited)} claim(s) cited, all in the register with a result")
+        result = claims.check_document(args.log, args.document, require_all=args.require_all)
+        print(
+            f"{args.document}: {len(result['cited'])} claim(s) cited, all in the register "
+            "with a current result"
+        )
+        for cid, status in result["cited"].items():
+            print(f"  {cid}: {status}")
+        if result["uncited"]:
+            print(f"  not cited: {', '.join(result['uncited'])}")
     return 0
 
 
@@ -260,6 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
     am.add_argument("claim")
     am.add_argument("--reason", required=True)
     am.add_argument("--prediction")
+    am.add_argument("--statement")
     am.add_argument("--question")
     am.add_argument("--questions", default="questions.yaml")
     am.add_argument("--construct", default="construct.yaml")
@@ -271,6 +300,9 @@ def build_parser() -> argparse.ArgumentParser:
     verbs.add_parser("show", help="print the register")
     cd = verbs.add_parser("check-doc", help="check that a document cites only backed claims")
     cd.add_argument("document")
+    cd.add_argument(
+        "--require-all", action="store_true", help="fail if any registered claim is not cited"
+    )
     claims.set_defaults(func=_claims)
     return parser
 

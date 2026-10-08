@@ -368,7 +368,9 @@ class Featurizer:
 
 def label_columns(fixture: Any, task: str) -> list[str]:
     rule = fixture.manifest.data["tasks"][task]["label_rule"]
-    return [rule["column"]] if rule.get("kind") == "column" else []
+    if rule.get("kind") == "column":
+        return [rule["column"]]
+    return list(rule.get("columns", []))
 
 
 def write_manifest(

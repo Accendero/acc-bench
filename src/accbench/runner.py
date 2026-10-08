@@ -50,6 +50,7 @@ import yaml
 from threadpoolctl import threadpool_info, threadpool_limits
 
 from accbench import metrics
+from accbench.appendlog import append
 from accbench.channels import Featurizer, load_registry
 from accbench.construct import load_construct
 from accbench.costs import Meter, load_prices
@@ -135,6 +136,16 @@ class Grid:
     @property
     def coverage_path(self) -> Path:
         return self.out.parent / f"{self.out.name}.coverage.json"
+
+    @property
+    def history_path(self) -> Path:
+        """Every record the runner has written, append-only. Re-runs replace records in
+        ``out``; this log keeps the time the first result existed."""
+        return history_path(self.out)
+
+
+def history_path(out: Path) -> Path:
+    return out.parent / f"{out.name}.history.jsonl"
 
 
 def _import_methods_module(path: Path) -> None:
@@ -296,12 +307,22 @@ def run_one(ctx: Context, key: RunKey, rows: tuple[pd.DataFrame, pd.DataFrame]) 
 
     def finish(payload: dict[str, Any], extra_inputs: Mapping[str, Path] = ()) -> dict[str, Any]:
         payload["cost"] = meter.to_dict()
-        return write_artifact(
+        record = write_artifact(
             key.record_path(out),
             payload,
             code=ctx.code,
             inputs={**_inputs(ctx), **dict(extra_inputs)},
         )
+        append(
+            ctx.grid.history_path,
+            {
+                "run": key.id,
+                "task": key.task,
+                "status": payload["status"],
+                "code_state": ctx.code.digest,
+            },
+        )
+        return record
 
     method = make_method(key.method)
     reason = method.unavailable()
@@ -481,4 +502,9 @@ def require_complete(cov: Mapping[str, Any]) -> None:
         f"{len(bad)} of {cov['planned']} planned runs are not complete "
         f"(error {c['error']}, missing {c['missing']}, stale {c['stale']}), e.g. {examples}; "
         "results over a partial grid would average each method over different cells"
+        + (
+            "; the stale runs were written under other code: run acc-bench run --rerun-stale"
+            if c["stale"]
+            else ""
+        )
     )

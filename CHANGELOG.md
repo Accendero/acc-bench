@@ -13,3 +13,4 @@ First release, published with the whitepaper *Seven Layers Between a Model and a
 - Append-only claims register with dated amendments and a document check (unit 6).
 - Provenance on every artifact: stamped on write, checked on read, refused on mismatch.
 - Synthetic and TrialBench examples, and a defect gallery of the paper's eight failures.
+- A user guide in ASD-STE100 Simplified Technical English; a test checks its wording and runs its example files.

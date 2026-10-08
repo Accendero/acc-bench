@@ -232,7 +232,9 @@ def test_amendment_needs_a_reason_and_a_change(bench):
             prediction="no_effect",
             questions=p["questions"],
         )
-    with pytest.raises(claims.ClaimError, match="changes the prediction"):
+    with pytest.raises(
+        claims.ClaimError, match="changes the statement, the prediction or the question"
+    ):
         claims.amend(p["log"], claim_id="C1", reason="r", construct=p["construct"])
 
 
@@ -277,7 +279,7 @@ def test_document_check(bench):
         claims.check_document(p["log"], doc)
     _run_and_decide(bench)
     claims.resolve(p["log"], verdicts=p["verdicts"])
-    assert set(claims.check_document(p["log"], doc)) == {"C1", "C2"}
+    assert set(claims.check_document(p["log"], doc)["cited"]) == {"C1", "C2"}
     doc.write_text("An unregistered finding [claim:C7].\n")
     with pytest.raises(claims.ClaimError, match="C7 is cited but not in the register"):
         claims.check_document(p["log"], doc)

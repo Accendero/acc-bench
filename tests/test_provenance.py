@@ -171,7 +171,7 @@ def test_code_state_mismatch_is_refused(tmp_path):
     out = tmp_path / "a.json"
     write_artifact(out, {}, code=old)
     (root / "run.py").write_text("print('changed')\n")
-    with pytest.raises(CodeStateMismatch, match="allow_code_drift"):
+    with pytest.raises(CodeStateMismatch, match="the code changed"):
         read_artifact(out, expected_code=_state(root))
 
 

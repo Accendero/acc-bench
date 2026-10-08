@@ -164,7 +164,10 @@ class BenchContext:
         return self._floors[cell]
 
     def _record(self, cell, method, split_key, seed):
-        key = RunKey(cell.split("/")[0], cell, method, split_key, seed)
+        task = cell.split("/")[0]
+        if task not in self.ctx.fixture.tasks or cell not in self.ctx.fixture.cells(task):
+            raise RuleError(f"'{cell}' is not a cell of the fixture")
+        key = RunKey(task, cell, method, split_key, seed)
         art = read_artifact(key.record_path(self.ctx.grid.out), expected_code=self.ctx.code)
         if art.data["status"] != "ok":
             raise RuleError(f"{cell}/{method} has no completed run ({art.data['status']})")
@@ -227,6 +230,7 @@ class Rule:
     func: Callable[..., Verdict]
     null_input: NullInput
     exact_null: NullInput | None = None
+    directional: bool = False
 
     @property
     def source_sha256(self) -> str:
@@ -244,11 +248,21 @@ class Rule:
 _RULES: dict[str, Rule] = {}
 
 
-def rule(name: str, *, null_input: NullInput, exact_null: NullInput | None = None):
-    """Register a decision rule with its null input (and, optionally, an exact null)."""
+def rule(
+    name: str,
+    *,
+    null_input: NullInput,
+    exact_null: NullInput | None = None,
+    directional: bool = False,
+):
+    """Register a decision rule with its null input (and, optionally, an exact null).
+
+    A ``directional`` rule names the better method in ``details["better"]`` and the two
+    sides in ``details["a"]`` and ``details["b"]``, so a claim can predict a direction.
+    """
 
     def wrap(func: Callable[..., Verdict]) -> Callable[..., Verdict]:
-        _RULES[name] = Rule(name, func, null_input, exact_null)
+        _RULES[name] = Rule(name, func, null_input, exact_null, directional)
         return func
 
     return wrap
@@ -303,7 +317,12 @@ def _exact_pair(seed: int):
     return ctx, params
 
 
-@rule("difference_clears_floor", null_input=_null_pair, exact_null=_exact_pair)
+@rule(
+    "difference_clears_floor",
+    null_input=_null_pair,
+    exact_null=_exact_pair,
+    directional=True,
+)
 def difference_clears_floor(
     ctx: RuleContext, *, cell: str, a: Any, b: Any, n_boot: int = 1000, seed: int = 0
 ) -> Verdict:
@@ -366,7 +385,7 @@ def k_of_n_cells(
     a difference between two methods is noisier than one method's floor, so on data with
     no effect it claimed one in 4 of 20 draws.
     """
-    clears, per_cell = [], {}
+    clears, unresolved, per_cell = [], [], {}
     for cell in cells:
         ma, mb = resolve_method(ctx, cell, a), resolve_method(ctx, cell, b)
         y, sa, clusters = ctx.test_rows(cell, ma)
@@ -376,17 +395,33 @@ def k_of_n_cells(
         per_cell[cell] = {"a": ma, "b": mb, "difference": iv.to_dict(), "floor": floor}
         if iv.lo > 0 and iv.point > floor:
             clears.append(cell)
-    details = {"k": k, "n": len(cells), "clears": clears, "per_cell": per_cell}
+        elif not iv.hi < floor:
+            unresolved.append(cell)  # a real lead for a cannot be ruled out here
+    details = {
+        "k": k,
+        "n": len(cells),
+        "clears": clears,
+        "unresolved": unresolved,
+        "per_cell": per_cell,
+    }
     if len(clears) >= k:
         return Verdict(
             "effect",
-            f"a beats b beyond the floor in {len(clears)} of {len(cells)} "
-            f"cells (rule: {k} or more)",
+            f"a beats b beyond the floor in {len(clears)} of {len(cells)} cells "
+            f"(rule: {k} or more)",
+            details,
+        )
+    if len(clears) + len(unresolved) >= k:
+        return Verdict(
+            "inconclusive",
+            f"{len(clears)} of {len(cells)} cells clear the floor and {len(unresolved)} cannot "
+            f"be decided (rule: {k} or more)",
             details,
         )
     return Verdict(
         "no_effect",
-        f"{len(clears)} of {len(cells)} cells clear the floor (rule: {k} or more)",
+        f"{len(clears)} of {len(cells)} cells clear the floor, and the rest cannot reach {k} "
+        f"(rule: {k} or more)",
         details,
     )
 
@@ -576,6 +611,9 @@ def load_questions(path: str | os.PathLike[str]) -> dict[str, Any]:
                 problems.append(f"{where}.{key}: missing")
         if q.get("rule") is not None and q["rule"] not in _RULES:
             problems.append(f"{where}.rule: unknown rule {q['rule']!r}")
+        elif q.get("rule") is not None and isinstance(q.get("params"), Mapping):
+            for m in _check_params(q["rule"], q["params"]):
+                problems.append(f"{where} ({q.get('id')}): {m}")
         ids.append(q.get("id"))
     if not data.get("questions"):
         problems.append("questions: list at least one question")
@@ -587,6 +625,86 @@ def load_questions(path: str | os.PathLike[str]) -> dict[str, Any]:
     return dict(data)
 
 
+def _check_params(name: str, params: Mapping[str, Any]) -> list[str]:
+    """Compare a question's parameters with the parameters its rule takes."""
+    taken = list(inspect.signature(get_rule(name).func).parameters.values())[1:]
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in taken):
+        return []
+    names = {p.name for p in taken}
+    required = sorted(p.name for p in taken if p.default is inspect.Parameter.empty)
+    problems = [f"rule {name} needs parameter '{r}'" for r in required if r not in params]
+    problems += [
+        f"rule {name} has no parameter '{k}' (it takes {sorted(names)})"
+        for k in sorted(set(params) - names)
+    ]
+    return problems
+
+
+METHOD_PARAMS = ("a", "b", "model", "reference")
+
+
+def _methods_in(spec: Any) -> list[str]:
+    if isinstance(spec, str):
+        return [spec]
+    if isinstance(spec, Mapping) and len(spec) == 1:
+        ((key, value),) = spec.items()
+        if key in ("select", "oracle_select") and isinstance(value, list):
+            return [str(v) for v in value]
+    return []
+
+
+def check_questions(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Load the questions and check them against the grid before anything runs: each
+    rule's parameters, each cell name against the frozen fixture, and each method name
+    against the grid. Raises :class:`RuleError` listing every problem."""
+    p = Path(path)
+    data = load_questions(p)
+    grid_file = p.parent / data["grid"]
+    if not grid_file.is_file():
+        raise RuleError(f"{p}: the grid {grid_file.name} does not exist yet; write it first")
+    from accbench.runner import load_grid, open_fixture
+
+    grid = load_grid(grid_file)
+    try:
+        fixture = open_fixture(
+            grid.file("fixture"), grid.path.parent / grid.data.get("fixtures_dir", "fixtures")
+        )
+        cells = {c for task in fixture.tasks for c in fixture.cells(task)}
+    except AccbenchError:
+        # Not frozen with the current construct (for example during an amendment):
+        # read the cell names from the spec without a freeze.
+        if grid.file("fixture").suffix not in (".yaml", ".yml"):
+            raise
+        from accbench.fixtures import spec_cells
+
+        cells = spec_cells(grid.file("fixture"))
+    methods = set(grid.data["methods"])
+    problems = []
+    for q in data["questions"]:
+        params = q["params"]
+        named = [params["cell"]] if isinstance(params.get("cell"), str) else []
+        if isinstance(params.get("cells"), list):
+            named += list(params["cells"])
+        for cell in named:
+            if cell not in cells:
+                problems.append(f"{q['id']}: '{cell}' is not a cell; the cells are {sorted(cells)}")
+        for key in METHOD_PARAMS:
+            if key not in params:
+                continue
+            found = _methods_in(params[key])
+            if not found:
+                problems.append(
+                    f"{q['id']}: {key} must be a method name, {{select: [..]}} or "
+                    "{oracle_select: [..]}"
+                )
+            for m in found:
+                if m not in methods:
+                    problems.append(f"{q['id']}: method '{m}' is not in the grid's methods")
+    if problems:
+        raise RuleError(f"questions file {p} does not match the grid: " + "; ".join(problems))
+    return data
+
+
 def decide(
     questions_path: str | os.PathLike[str],
     *,
@@ -596,7 +714,7 @@ def decide(
 ) -> dict[str, Any]:
     """Run the null-input suite for the rules in use, then answer every question."""
     qpath = Path(questions_path)
-    q = load_questions(qpath)
+    q = check_questions(qpath)
     grid = load_grid(qpath.parent / q["grid"])
     gctx = prepare(grid, code=code or code_state([qpath.parent]))
     code = gctx.code

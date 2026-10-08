@@ -332,7 +332,9 @@ def check_artifact(
             f"expected {expected_code.short()}"
         )
         if not allow_code_drift:
-            raise CodeStateMismatch(msg + "; recompute it, or pass allow_code_drift to override")
+            raise CodeStateMismatch(
+                msg + "; the code changed, so make this file again with the current code"
+            )
         overrides.append(f"code drift accepted on read: {msg}")
 
     return Artifact(

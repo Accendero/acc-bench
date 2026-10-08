@@ -32,6 +32,9 @@ The labels and fields come from ClinicalTrials.gov.
 | `acc-bench resolve`, `verdict`, `claims resolve` | floors, verdicts and the claims register |
 
 The two claims were written from the paper's published results before this example was
-first run, and they come back however they come back. On the first run, TB1 (the text
-model wins on Phase 1) was inconclusive: Phase 1's floor of about 0.07 is wider than the
-difference. TB2 (no win in 3 or more phases) was confirmed.
+first run, and they come back however they come back. Both come back inconclusive:
+
+- TB1 (the text model wins on Phase 1): Phase 1's floor of about 0.07 is wider than the
+  difference of about 0.04.
+- TB2 (no win in 3 or more phases): the text model clears the floor in 2 phases, and the
+  other 2 phases cannot be decided, so 3 of 4 cannot be ruled out.

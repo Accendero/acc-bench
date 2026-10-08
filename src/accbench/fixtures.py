@@ -128,7 +128,8 @@ def validate_spec(spec: Any, construct: Construct | None = None) -> list[str]:
             for key in ("source", "type", "label_rule"):
                 if key not in t:
                     problems.append(f"{where}.{key}: missing")
-            for key in sorted(set(t) - {"source", "type", "label_rule", "cell_by"}):
+            allowed_task = {"source", "type", "label_rule", "label_columns", "cell_by"}
+            for key in sorted(set(t) - allowed_task):
                 problems.append(f"{where}.{key}: unknown key")
             if "type" in t and t["type"] not in TASK_TYPES:
                 problems.append(f"{where}.type: must be one of {list(TASK_TYPES)}")
@@ -145,6 +146,18 @@ def validate_spec(spec: Any, construct: Construct | None = None) -> list[str]:
                     problems.append(
                         f"{where}.label_rule: must be 'module:function' or "
                         "{column: name, map: {...}} (one rule, no fallbacks)"
+                    )
+                cols = t.get("label_columns")
+                if ok_fn and not (
+                    isinstance(cols, list) and cols and all(isinstance(c, str) for c in cols)
+                ):
+                    problems.append(
+                        f"{where}.label_columns: a function label rule must name the columns "
+                        "it reads, so no model can read them"
+                    )
+                if ok_col and "label_columns" in t:
+                    problems.append(
+                        f"{where}.label_columns: only a function label rule takes label_columns"
                     )
 
     split = spec.get("split")
@@ -269,9 +282,19 @@ def _import_rule(ref: str, search: Path) -> Callable[[pd.DataFrame], Any]:
     return func
 
 
+def _same_labels(first: Any, second: Any) -> bool:
+    a = pd.to_numeric(pd.Series(np.asarray(first)), errors="coerce").to_numpy(dtype=float)
+    b = pd.to_numeric(pd.Series(np.asarray(second)), errors="coerce").to_numpy(dtype=float)
+    return a.shape == b.shape and bool(np.array_equal(a, b, equal_nan=True))
+
+
 def apply_label_rule(
-    rule: Any, table: pd.DataFrame, *, search: Path
-) -> tuple[pd.Series, dict[str, str]]:
+    rule: Any,
+    table: pd.DataFrame,
+    *,
+    search: Path,
+    label_columns: list[str] | None = None,
+) -> tuple[pd.Series, dict[str, Any]]:
     """Apply the task's one label rule. Returns the labels and a description of the rule."""
     if isinstance(rule, Mapping):
         col = rule["column"]
@@ -287,7 +310,24 @@ def apply_label_rule(
         return pd.Series(labels, index=table.index), desc
 
     func = _import_rule(rule, search)
+    declared = list(label_columns or [])
+    missing = [c for c in declared if c not in table.columns]
+    if missing:
+        raise FixtureError(f"label_columns names {missing}, which the source table lacks")
     labels = func(table.copy())
+    # The function must give the same labels from the declared columns alone; if it does
+    # not, it reads a column that label_columns does not name, and a model could read it.
+    try:
+        restricted = func(table[declared].copy())
+    except (KeyError, IndexError) as exc:
+        raise FixtureError(
+            f"label rule {rule!r} reads a column that label_columns does not name ({exc})"
+        ) from exc
+    if not _same_labels(labels, restricted):
+        raise FixtureError(
+            f"label rule {rule!r} gives different labels from the columns in label_columns "
+            "alone; it reads a column that label_columns does not name"
+        )
     labels = pd.Series(labels, index=table.index) if not isinstance(labels, pd.Series) else labels
     if not labels.index.equals(table.index):
         raise FixtureError(f"label rule {rule!r} must return one label per row, in table order")
@@ -298,6 +338,7 @@ def apply_label_rule(
     desc = {
         "kind": "function",
         "ref": rule,
+        "columns": declared,
         "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
     }
     return labels, desc
@@ -408,6 +449,16 @@ class Fixture:
         features = source.loc[assignments["id"]].reset_index()
         return assignments, features
 
+    def cell_table(self) -> str:
+        """One line per cell: rows in train, validation and test under the primary key."""
+        key = self.split_keys[0]
+        lines = [f"  {'cell':30} {'train':>7} {'validation':>10} {'test':>7}   (split key {key})"]
+        for t in self.manifest.data["tasks"].values():
+            for cell, by_key in t["split_counts"].items():
+                c = by_key[key]
+                lines.append(f"  {cell:30} {c['train']:7d} {c['validation']:10d} {c['test']:7d}")
+        return "\n".join(lines)
+
     def summary(self) -> str:
         parts = []
         for task, t in self.manifest.data["tasks"].items():
@@ -426,6 +477,21 @@ def freeze(
 ) -> Fixture:
     """Freeze the fixture a spec describes. Refuses without a valid construct statement."""
     return _freeze(spec_path, out_dir=out_dir, code=code, write=True)
+
+
+def spec_cells(spec_path: str | os.PathLike[str]) -> set[str]:
+    """The cell names a fixture spec gives, read from its source tables without a freeze."""
+    spec_file = Path(spec_path)
+    spec = yaml.safe_load(spec_file.read_text(encoding="utf-8"))
+    cells: set[str] = set()
+    for task, t in (spec.get("tasks") or {}).items():
+        cell_by = t.get("cell_by")
+        if cell_by is None:
+            cells.add(task)
+            continue
+        values = pd.read_csv(spec_file.parent / t["source"], usecols=[cell_by])[cell_by]
+        cells |= {f"{task}/{v}" for v in values.dropna().astype(str).unique()}
+    return cells
 
 
 def locate_fixture(
@@ -495,7 +561,9 @@ def _freeze(
                 "(use cluster_column for units that repeat)"
             )
 
-        raw_labels, rule_desc = apply_label_rule(t["label_rule"], table, search=base)
+        raw_labels, rule_desc = apply_label_rule(
+            t["label_rule"], table, search=base, label_columns=t.get("label_columns")
+        )
         excluded: dict[str, int] = {}
         missing = raw_labels.isna()
         if missing.any():

@@ -268,17 +268,18 @@ def test_multiclass_task(bench):
     (bench.root / "labels.py").write_text(
         "import pandas as pd\n"
         "def dropout(t):\n"
-        "    return pd.cut(t['enrollment'], [0, 500, 1200, 10**6], labels=False)\n"
+        "    return pd.to_datetime(t['registered_on']).dt.year % 3\n"
     )
     bench.spec["tasks"]["dropout"] = {
         "source": "data/mortality.csv",
         "type": "multiclass",
         "label_rule": "labels:dropout",
+        "label_columns": ["registered_on"],  # ignored in the registry, so no model reads it
     }
     bench.build(tasks=["dropout"])
     assert run_grid(bench.grid)["ok"] == 2
     rec = read_artifact(bench.runs / "dropout" / "dropout__logreg__split-0__s0.json").data
-    assert rec["results"]["test"]["score"] > 0.5  # enrollment is a feature
+    assert 0 < rec["results"]["test"]["score"] < 1
     pred = pd.read_csv(bench.runs / "dropout" / "dropout__logreg__split-0__s0.predictions.csv")
     assert {"p_0", "p_1", "p_2"} <= set(pred.columns)
 

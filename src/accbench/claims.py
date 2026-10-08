@@ -35,8 +35,9 @@ from typing import Any
 from accbench.appendlog import append, read_log
 from accbench.construct import load_construct
 from accbench.errors import AccbenchError
-from accbench.provenance import file_digest, read_artifact
-from accbench.rules import load_questions
+from accbench.provenance import code_state, file_digest, read_artifact
+from accbench.rules import check_questions
+from accbench.runner import history_path
 
 STATUSES = ("registered", "confirmed", "refuted", "inverted", "inconclusive", "untested")
 DOC_PATTERN = r"\[claim:([A-Za-z0-9_.\-]+)\]"
@@ -70,10 +71,31 @@ def _parse_prediction(prediction: str) -> tuple[str, str | None]:
     outcome, _, direction = prediction.partition(":")
     if outcome not in ("effect", "no_effect") or (outcome == "no_effect" and direction):
         raise ClaimError(
-            f"prediction must be 'effect', 'effect:<the better method>' or 'no_effect'; "
-            f"got {prediction!r}"
+            "prediction must be 'effect', 'effect:a', 'effect:b', 'effect:<the better method>' "
+            f"or 'no_effect'; got {prediction!r}"
         )
     return outcome, direction or None
+
+
+def _check_prediction(prediction: str, snapshot: Mapping[str, Any]) -> None:
+    """Refuse a prediction its question's rule cannot decide, when it is written."""
+    from accbench.rules import _methods_in, get_rule
+
+    _, direction = _parse_prediction(prediction)
+    if direction is None:
+        return
+    rule = snapshot["rule"]
+    if not get_rule(rule).directional:
+        raise ClaimError(
+            f"rule {rule} does not report which method is better; predict 'effect' or 'no_effect'"
+        )
+    params = snapshot["params"]
+    named = {m for side in ("a", "b") for m in _methods_in(params.get(side))}
+    if direction not in ("a", "b") and direction not in named:
+        raise ClaimError(
+            f"the prediction names {direction!r}, which is not a or b and not a method of this "
+            f"question ({sorted(named)})"
+        )
 
 
 def load_claims(log: str | os.PathLike[str]) -> dict[str, Claim]:
@@ -96,6 +118,7 @@ def load_claims(log: str | os.PathLike[str]) -> dict[str, Claim]:
         c = claims[cid]
         if e["kind"] == "amend":
             c.amendments.append(e)
+            c.statement = e.get("statement", c.statement)
             c.prediction = e.get("prediction", c.prediction)
             c.question = e.get("question", c.question)
             c.snapshot = e.get("snapshot", c.snapshot)
@@ -109,7 +132,7 @@ def load_claims(log: str | os.PathLike[str]) -> dict[str, Claim]:
 
 
 def _snapshot(questions_path: Path, question_id: str) -> dict[str, Any]:
-    q = load_questions(questions_path)
+    q = check_questions(questions_path)
     for question in q["questions"]:
         if question["id"] == question_id:
             return {"rule": question["rule"], "params": question["params"]}
@@ -136,6 +159,8 @@ def register(
         raise ClaimError("state the claim")
     _parse_prediction(prediction)
     c = load_construct(construct)
+    snapshot = _snapshot(Path(questions), question)
+    _check_prediction(prediction, snapshot)
     return append(
         log,
         {
@@ -145,7 +170,7 @@ def register(
             "question": question,
             "prediction": prediction,
             "claim_kind": "exploratory" if exploratory else "confirmatory",
-            "snapshot": _snapshot(Path(questions), question),
+            "snapshot": snapshot,
             "construct_version": c.version,
             "construct_sha256": c.sha256,
         },
@@ -161,6 +186,7 @@ def amend(
     prediction: str | None = None,
     question: str | None = None,
     questions: str | os.PathLike[str] | None = None,
+    statement: str | None = None,
 ) -> dict[str, Any]:
     """Amend a claim in the open. The construct must have a newer version than the claim's."""
     claims = load_claims(log)
@@ -168,8 +194,8 @@ def amend(
         raise ClaimError(f"claim {claim_id!r} is not registered")
     if not reason.strip():
         raise ClaimError("an amendment needs its reason")
-    if prediction is None and question is None:
-        raise ClaimError("an amendment changes the prediction, the question, or both")
+    if prediction is None and question is None and statement is None:
+        raise ClaimError("an amendment changes the statement, the prediction or the question")
     claim = claims[claim_id]
     c = load_construct(construct)
     if c.version <= claim.construct_version:
@@ -185,6 +211,10 @@ def amend(
         "construct_sha256": c.sha256,
         "had_result": claim.resolution is not None,
     }
+    if statement is not None:
+        if not statement.strip():
+            raise ClaimError("state the claim")
+        record["statement"] = statement
     if prediction is not None:
         _parse_prediction(prediction)
         record["prediction"] = prediction
@@ -193,6 +223,7 @@ def amend(
             raise ClaimError("pass the questions file so the amended question can be snapshotted")
         record["question"] = question or claim.question
         record["snapshot"] = _snapshot(Path(questions), record["question"])
+        _check_prediction(prediction or claim.prediction, record["snapshot"])
     return append(log, record)
 
 
@@ -205,7 +236,12 @@ def mark_untested(log: str | os.PathLike[str], *, claim_id: str, reason: str) ->
 
 
 def _earliest_run(runs_dir: Path) -> str | None:
-    times = []
+    """The time the first result behind these runs existed.
+
+    The runner's history log keeps every record it ever wrote, so a re-run, which
+    replaces the records, cannot move this time later.
+    """
+    times = [e["recorded_at"] for e in read_log(history_path(runs_dir))]
     for p in runs_dir.rglob("*.json"):
         try:
             stamp = json.loads(p.read_text(encoding="utf-8")).get("_provenance", {})
@@ -227,7 +263,10 @@ def status_for(prediction: str, verdict: Mapping[str, Any]) -> str:
         return "refuted"
     if direction is None:
         return "confirmed"
-    better = verdict.get("details", {}).get("better")
+    details = verdict.get("details", {})
+    better = details.get("better")
+    if direction in ("a", "b"):
+        direction = details.get(direction, direction)
     if better is None:
         raise ClaimError(
             f"the prediction names a direction ({direction}) but rule {verdict['rule']!r} "
@@ -311,15 +350,38 @@ def _sha(path: Path) -> str:
     return file_digest(path)
 
 
+def _result_is_current(claim: Claim, log: Path) -> str | None:
+    """Why a claim's recorded result can no longer be used, or None if it can."""
+    if claim.resolution is None:
+        return None
+    vpath = Path(claim.resolution["verdicts_path"])
+    if not vpath.is_absolute() and not vpath.exists():
+        vpath = log.parent / vpath
+    if not vpath.exists():
+        return f"its verdicts file {vpath} is gone"
+    if file_digest(vpath) != claim.resolution["verdicts_sha256"]:
+        return "the verdicts changed after it was resolved; run acc-bench claims resolve"
+    try:
+        read_artifact(vpath, expected_code=code_state([log.resolve().parent]))
+    except AccbenchError as exc:
+        return f"its verdicts are out of date ({exc})"
+    return None
+
+
 def check_document(
     log: str | os.PathLike[str],
     document: str | os.PathLike[str],
     *,
     pattern: str = DOC_PATTERN,
-) -> dict[str, str]:
-    """Every claim a document cites must be in the register and have a result.
+    require_all: bool = False,
+) -> dict[str, Any]:
+    """Every claim a document cites must be in the register, with a current result.
 
-    Claims are cited as ``[claim:C1]`` by default. Returns the status of each cited claim.
+    Claims are cited as ``[claim:C1]`` by default. A result is current when the verdicts
+    behind it are unchanged and were written by the code running now. With
+    ``require_all``, every claim in the register must be cited. The check does not read
+    the text around a citation; a person must make sure the text agrees with the result.
+    Returns the status of each cited claim and the claims the document does not cite.
     """
     text = Path(document).read_text(encoding="utf-8")
     cited = sorted(set(re.findall(pattern, text)))
@@ -330,11 +392,18 @@ def check_document(
             problems.append(f"{cid} is cited but not in the register")
         elif claims[cid].status == "registered":
             problems.append(f"{cid} is cited but has no result yet")
+        elif why := _result_is_current(claims[cid], Path(log)):
+            problems.append(f"{cid}: {why}")
+    uncited = sorted(set(claims) - set(cited))
+    if require_all and uncited and not problems:
+        raise ClaimError(f"{document} does not cite these registered claims: {uncited}")
+    if require_all and uncited:
+        problems.append(f"the document does not cite these registered claims: {uncited}")
     if problems:
         raise ClaimError(
             f"{document} cites claims the register cannot back: " + "; ".join(problems)
         )
-    return {cid: claims[cid].status for cid in cited}
+    return {"cited": {cid: claims[cid].status for cid in cited}, "uncited": uncited}
 
 
 def table(log: str | os.PathLike[str]) -> list[dict[str, Any]]:
@@ -355,6 +424,9 @@ def table(log: str | os.PathLike[str]) -> list[dict[str, Any]]:
                     {"at": a["recorded_at"], "reason": a["reason"]} for a in c.amendments
                 ],
                 "resolved_at": c.resolution["recorded_at"] if c.resolution else None,
+                "amended_after_results": bool(
+                    c.resolution and c.resolution.get("amended_after_results")
+                ),
                 "evidence": c.resolution["verdicts_path"] if c.resolution else None,
                 "untested_reason": c.untested_reason,
             }

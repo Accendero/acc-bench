@@ -223,6 +223,7 @@ def test_label_rule_function(project):
         "def mortality(t):\n    return (t['died'] == 1).astype(int)\n"
     )
     project.spec["tasks"]["mortality"]["label_rule"] = "labels:mortality"
+    project.spec["tasks"]["mortality"]["label_columns"] = ["died"]
     fx = _freeze(project)
     rule = fx.manifest.data["tasks"]["mortality"]["label_rule"]
     assert rule["kind"] == "function" and rule["ref"] == "labels:mortality"
@@ -331,6 +332,7 @@ def test_label_rules_from_two_projects_do_not_collide(tmp_path):
         p.root.mkdir(parents=True)
         (p.root / "labels.py").write_text(f"def mortality(t):\n    return {expr}\n")
         p.spec["tasks"]["mortality"]["label_rule"] = "labels:mortality"
+        p.spec["tasks"]["mortality"]["label_columns"] = ["died"]
         fx = freeze(p.write().spec_path, out_dir=p.out)
         results.append(fx.assignments("mortality").set_index("id")["label"])
     assert (results[0] == 1 - results[1]).all()
@@ -338,6 +340,7 @@ def test_label_rules_from_two_projects_do_not_collide(tmp_path):
 
 def test_label_rule_that_cannot_be_imported(project):
     project.spec["tasks"]["mortality"]["label_rule"] = "no_such_module:f"
+    project.spec["tasks"]["mortality"]["label_columns"] = ["died"]
     project.write()
     with pytest.raises(FixtureError, match="cannot import"):
         freeze(project.spec_path, out_dir=project.out)
@@ -349,3 +352,43 @@ def test_changed_source_data_gives_a_new_fixture(project):
     project.table = project.table.assign(city="Boston")
     second = _freeze(project)
     assert first.hash != second.hash
+
+
+def test_function_label_rule_must_declare_what_it_reads(project):
+    project.root.mkdir(parents=True, exist_ok=True)
+    (project.root / "labels.py").write_text(
+        "def mortality(t):\n    return ((t['died'] == 1) & (t['age'] > 0)).astype(int)\n"
+    )
+    project.spec["tasks"]["mortality"]["label_rule"] = "labels:mortality"
+    project.write()
+    with pytest.raises(FixtureError, match="must name the columns it reads"):
+        freeze(project.spec_path, out_dir=project.out)
+    project.spec["tasks"]["mortality"]["label_columns"] = ["died"]  # age is not declared
+    project.write()
+    with pytest.raises(FixtureError, match="does not name"):
+        freeze(project.spec_path, out_dir=project.out)
+    project.spec["tasks"]["mortality"]["label_columns"] = ["died", "age"]
+    project.write()
+    fx = freeze(project.spec_path, out_dir=project.out)
+    assert fx.manifest.data["tasks"]["mortality"]["label_rule"]["columns"] == ["died", "age"]
+
+
+def test_a_declared_label_column_cannot_sit_in_a_channel(project):
+    from accbench.channels import Registry, write_manifest
+    from conftest import REGISTRY
+
+    project.root.mkdir(parents=True, exist_ok=True)
+    (project.root / "labels.py").write_text(
+        "def mortality(t):\n    return (t['enrollment'] > 1000).astype(int)\n"
+    )
+    project.spec["tasks"]["mortality"]["label_rule"] = "labels:mortality"
+    project.spec["tasks"]["mortality"]["label_columns"] = ["enrollment"]
+    fx = _freeze(project)
+    import yaml
+
+    (project.root / "channels.yaml").write_text(yaml.safe_dump(REGISTRY))
+    assert Registry.from_dict(REGISTRY).owner("enrollment") == "tabular"
+    from accbench.errors import ChannelError
+
+    with pytest.raises(ChannelError, match="would leak"):
+        write_manifest(project.root / "channels.yaml", fx, project.root / "m.json")

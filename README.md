@@ -18,6 +18,12 @@ python -m pip install "git+https://github.com/Accendero/acc-bench"
 Python 3.10 or later. Core dependencies: numpy, pandas, scikit-learn, scipy, PyYAML.
 No deep-learning framework and no cloud SDK.
 
+## Instructions
+
+The [user guide](docs/user-guide.md) gives step-by-step instructions, from installation
+to a checked report. It is written in ASD-STE100 Simplified Technical English, and a test
+runs every example file in it.
+
 ## See it work
 
 ```bash
