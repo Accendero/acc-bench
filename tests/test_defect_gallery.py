@@ -118,6 +118,9 @@ def test_3_uncommitted_fix_changes_the_code_state(bench):
             capture_output=True,
         )
 
+    # A real project ignores bytecode and run outputs; without this, the __pycache__
+    # that importing my_methods.py writes would make the tree dirty before the fix.
+    (bench.root / ".gitignore").write_text("__pycache__/\nruns/\nruns.*\n")
     git("init", "-q")
     git("add", ".")
     git("commit", "-qm", "before the repair")
