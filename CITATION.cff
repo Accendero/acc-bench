@@ -3,7 +3,7 @@ message: "If you use acc-bench, please cite it as below."
 title: "acc-bench: a benchmarking system with seven checked layers between a model and a claim"
 type: software
 authors:
-  - name: "Accendero Software, LLC"
+  - name: "Accendero Software, Inc."
 version: 0.1.0
 license: MIT
 repository-code: "https://github.com/Accendero/acc-bench"

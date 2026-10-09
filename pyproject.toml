@@ -9,7 +9,7 @@ description = "A benchmarking system with seven checked layers between a model a
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Accendero Software, LLC" }]
+authors = [{ name = "Accendero Software, Inc." }]
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
